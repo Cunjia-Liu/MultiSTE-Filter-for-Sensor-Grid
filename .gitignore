@@ -1,0 +1,5 @@
+/Results/
+*.asv
+*.m~
+matlab_crash_dump*
+*.mex*

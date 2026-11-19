@@ -1,38 +1,5 @@
 function [newparticle,newweights,Dk,hopt] = resample_PF(particles,weights,D,regularizeMode)
 
-    % % if nargin == 2
-    % %     D = length(weights);
-    % % end
-    % 
-    % CSW = cumsum(weights);
-    % ii = 1 ;
-    % indx = zeros(D,1);
-    % u(1) = rand/D;
-    % 
-    % for jj = 1:D
-    %     uj = u(1) + (jj-1)/D;
-    %     while uj > CSW(ii)
-    %         ii = ii + 1;
-    %     end
-    %     indx(jj) = ii;
-    % end
-    % 
-    % fields = fieldnames(particles);
-    % 
-    % 
-    % for findx = 1:length(fields)
-    %     newparticle.(fields{findx}) = particles.(fields{findx})(indx,:);
-    % end
-    % % regularizeMode = 1;
-    % 
-    % % === ADD: carry mask through resampling ===
-    % if isfield(particles,'mask')
-    %     newparticle.mask = particles.mask(indx,:);
-    %     % and immediately enforce Q=0 on inactive slots
-    %     newparticle.Q = newparticle.Q .* (newparticle.mask ~= 0);
-    % end
-
-
         % --- residual resampling ---
     % 1. expected counts
     expCount = D * weights(:);                  % D x 1
@@ -87,43 +54,124 @@ function [newparticle,newweights,Dk,hopt] = resample_PF(particles,weights,D,regu
     % equal weights after resample
     % newweights = ones(D,1) / D;
 
+    newweights = ones(D,1)/D;
 
 
-    [Np,N_sources] = size(particles.(fields{1}));
+    [Np, N_sources] = size(particles.(fields{1}));
 
-    if regularizeMode==1
+    if regularizeMode == 1
+        % Per-source, decoupled regularisation (xy and Q separate)
         for ns = 1:N_sources
-            xyparticlemat = [particles.x(:,ns) particles.y(:,ns)];
-            Qparticlemat = particles.Q(:,ns);%*particles.mask(:,ns);
-            xymeanest = weights'*xyparticlemat;
-            Qmeanest = weights'*Qparticlemat;
-            xyparticleCovariance = (xyparticlemat-xymeanest)'*diag(weights)*(xyparticlemat-xymeanest);
-            QparticleCovariance = (Qparticlemat-Qmeanest)'*diag(weights)*(Qparticlemat-Qmeanest);
-            Dk.xy(:,:,ns) = cholcov(xyparticleCovariance);
-            Dk.Q(ns) = cholcov(QparticleCovariance);
+
+            % Active particles for this source
+            if isfield(particles,'mask')
+                idx = (particles.mask(:,ns) ~= 0);
+            else
+                idx = true(Np,1);
+            end
+
+            if ~any(idx)
+                % No active samples: tiny jitter
+                Dk.xy(:,:,ns) = 1e-6 * eye(2);
+                Dk.Q(ns,1)    = 1e-6;
+                continue;
+            end
+
+            w = weights(idx);
+            sw = sum(w);
+            if sw <= 0 || ~isfinite(sw)
+                Dk.xy(:,:,ns) = 1e-6 * eye(2);
+                Dk.Q(ns,1)    = 1e-6;
+                continue;
+            end
+            w = w / sw;
+
+            % Data for this source
+            Xxy = [particles.x(idx,ns), particles.y(idx,ns)];
+            XQ  = particles.Q(idx,ns);
+
+            % Means
+            mu_xy = w' * Xxy;      % 1x2
+            mu_Q  = w' * XQ;       % scalar
+
+            % Deviations
+            dxy = Xxy - mu_xy;     % Na x 2
+            dQ  = XQ  - mu_Q;      % Na x 1
+
+            % Weighted covariances
+            Cxy = (dxy' .* w') * dxy + 1e-9*eye(2);
+            CQ  = (dQ'  .* w') * dQ  + 1e-9;
+
+            % Store Cholesky / std
+            Dk.xy(:,:,ns) = cholcov(Cxy);   % 2x2
+            Dk.Q(ns,1)    = sqrt(CQ);       % scalar
         end
-    elseif regularizeMode==2
-        xyparticlemat = zeros(Np,2*N_sources);
-        Qparticlemat = zeros(Np,N_sources);
+
+    elseif regularizeMode == 2
+        % Block-diagonal global matrices:
+        % - each source ns has its own [x,y] 2x2 block and Q scalar
+        % - combine into Dk.xy (2N x 2N) and Dk.Q (N x N, diagonal)
+        Lxy_blocks = cell(1, N_sources);
+        LQ_diag    = zeros(N_sources,1);
+
         for ns = 1:N_sources
-            xymatindx = 2*(ns-1)+1;
-            xyparticlemat(:,xymatindx:xymatindx+1) = [particles.x(:,ns) particles.y(:,ns)];%.*particles.mask(:,ns);
-            Qparticlemat(:,ns) = particles.Q(:,ns);%.*particles.mask(:,ns);
+
+            % Active particles for this source
+            if isfield(particles,'mask')
+                idx = (particles.mask(:,ns) ~= 0);
+            else
+                idx = true(Np,1);
+            end
+
+            if ~any(idx)
+                Lxy_blocks{ns} = 1e-6 * eye(2);
+                LQ_diag(ns)    = 1e-6;
+                continue;
+            end
+
+            w = weights(idx);
+            sw = sum(w);
+            if sw <= 0 || ~isfinite(sw)
+                Lxy_blocks{ns} = 1e-6 * eye(2);
+                LQ_diag(ns)    = 1e-6;
+                continue;
+            end
+            w = w / sw;
+
+            % Data for this source
+            Xxy = [particles.x(idx,ns), particles.y(idx,ns)];
+            XQ  = particles.Q(idx,ns);
+
+            % Means
+            mu_xy = w' * Xxy;      % 1x2
+            mu_Q  = w' * XQ;
+
+            % Deviations
+            dxy = Xxy - mu_xy;
+            dQ  = XQ  - mu_Q;
+
+            % Weighted covariances
+            Cxy = (dxy' .* w') * dxy + 0.001*eye(2);
+            CQ  = (dQ'  .* w') * dQ  + 1e-6;
+
+            % Cholesky for this block
+            Lxy_blocks{ns} = cholcov(Cxy);  % 2x2
+            LQ_diag(ns)    = sqrt(CQ);      % 1x1
         end
-        xymeanest = weights'*xyparticlemat;
-        Qmeanest = weights'*Qparticlemat;
-        xyparticleCovariance = (xyparticlemat-xymeanest)'*diag(weights)*(xyparticlemat-xymeanest);
-        QparticleCovariance = (Qparticlemat-Qmeanest)'*diag(weights)*(Qparticlemat-Qmeanest);
-        Dk.xy = cholcov(xyparticleCovariance);
-        Dk.Q = cholcov(QparticleCovariance);
+
+        % Assemble big block-diagonal matrices (same interface as old code)
+        Dk.xy = blkdiag(Lxy_blocks{:});     % (2N_sources x 2N_sources)
+        Dk.Q  = diag(LQ_diag);              % (N_sources x N_sources)
+
     else
-        error("Regularization Mode Incorrectly set. Set 'regularizeMode' to 1 for source decouple regularisation and 2 for coupled regularisation");
+        error("Regularization Mode Incorrectly set. Set 'regularizeMode' to 1 or 2.");
     end
 
     newweights = ones(D,1)/D;
 
-    mm = N_sources*length(fields); % The dimension of parameter space
-    A = (4/(mm+2))^(1/(mm+4)); %InstantaneousGaussian
-    hopt = A*(D^(-1/(mm+4)));
+    mm = N_sources * length(fields);              % same as before
+    A  = (4/(mm+2))^(1/(mm+4));
+    hopt = A * (D^(-1/(mm+4)));
+
 
 end

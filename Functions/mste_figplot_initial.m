@@ -8,7 +8,7 @@ t_length = length(EstHistory);
 NoA = size(EstHistory(1).pose,1);
 
 measurementcell = cell(1,t_length);
-hmap = brewermap(2*NoA+1,'Set1');
+hmap = brewermap(max([7,2*NoA+1,NoA+N_sources+1]),'Set1');
 hmap = hmap([1:5,7:end],:);
 
 f = figure(fighandle);
@@ -24,15 +24,20 @@ at1.Position = [0.148402555910543,0.771684981684982,0.75,0.16]; %0.1484025559105
 plotstruct.histogramarray = [];
 plotstruct.histmean = [];
 for ns=1:N_sources
-    h = histogram(at1,nan,'Normalization','pdf','DisplayStyle','bar','HandleVisibility','off','EdgeColor','none','FaceColor',hmap(NoA+ns,:),'FaceAlpha',0.3,'BinLimits', [0, 20]);
+    % Explicit edges prevent empty initial data from leaving a single wide bin.
+    h = histogram(at1,nan,'Normalization','pdf','DisplayStyle','bar', ...
+        'HandleVisibility','off','EdgeColor',hmap(NoA+ns,:), ...
+        'EdgeAlpha',0.65,'LineWidth',0.5,'FaceColor',hmap(NoA+ns,:), ...
+        'FaceAlpha',0.35,'BinEdges',linspace(0,20,61));
     plotstruct.histogramarray = [plotstruct.histogramarray;h];
     plotstruct.histmean = [plotstruct.histmean; xline(NaN,'--','Color',hmap(NoA+ns,:),'linewidth',2,'Alpha',1)]; %,'LabelHorizontalAlignment','center','Interpreter','latex','LabelVerticalAlignment','bottom');
     legendlabelsQ{ns} = ['$\hat{\Theta}(Q)_{',num2str(ns),'}$'];
 end
-xline(ts.Q,'-','Color','k','linewidth',2,'Alpha',0.5);
-xlabel('$Q$'); ylabel('$p(Q)$');
+hTruth = xline(at1,ts.Q,'-','Color','k','linewidth',2,'Alpha',0.5,'HandleVisibility','off');
+xlabel(at1,'Release rate Q (g/s)'); ylabel(at1,'Density');
 legendlabelsQ{end+1} = 'Truth';
-legend(legendlabelsQ,'Interpreter','latex','Orientation','horizontal','FontSize',12,'Location','bestoutside',Position=[0.127385796412274,0.65914797008547,0.768522350993377,0.03710699023199]);
+legend(at1,[plotstruct.histmean;hTruth(1)],legendlabelsQ,'Interpreter','latex', ...
+    'Orientation','horizontal','FontSize',10,'Location','southoutside','AutoUpdate','off');
 
 at2 =  subplot(3,1,[2 3]); hold on;
 at2.Position = [0.151090342679128,0.09406779661017,0.72702492211838,0.527401129943503];
@@ -53,8 +58,9 @@ plot(nan,nan,'p','MarkerSize',10,'handlevisibility', 'on','MarkerEdgeColor','k',
 plot(ts.x,ts.y,'ko','MarkerSize',6,'MarkerFaceColor','k');
 plot(Domain,'FaceColor','none','EdgeColor', 'b','HandleVisibility','off');
 axis([xmin xmax ymin ymax]);
-xlabel('$x$ (m)'); ylabel('$y$ (m)');
-axis square
+xlabel('x (m)'); ylabel('y (m)');
+axis equal
+axis([xmin xmax ymin ymax]);
 hold off;
 legendlabelsS{end+1} = 'Est.';
 legendlabelsS{end+1} = 'Source';

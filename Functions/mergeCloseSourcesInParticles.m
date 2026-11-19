@@ -1,6 +1,6 @@
 function particles = mergeCloseSourcesInParticles(particles, Domain, threshFrac, Qmin)
 % MERGECLOSESOURCESINPARTICLES
-% For each particle, find the closest pair among its K source locations.
+% For each particle, find the closest pair among its ACTIVE source locations.
 % If distance < threshFrac * domainDiagonal, merge that pair:
 %   - (x,y) := average; Q := sum
 %   - re-seed the freed slot uniformly in Domain with Qmin
@@ -13,7 +13,7 @@ function particles = mergeCloseSourcesInParticles(particles, Domain, threshFrac,
 %
 % Output:
 %   particles : updated struct
-    
+
 indxwithzerosource = find(sum(particles.mask ~= 0,2)==0);
     Qth = Qmin;
 
@@ -40,6 +40,10 @@ indxwithzerosource = find(sum(particles.mask ~= 0,2)==0);
         dy = yi(Ui) - yi(Uj);
         d2 = dx.*dx + dy.*dy;
 
+        % Inactive slots must not hide a close pair of active sources.
+        active = particles.mask(i,:).' ~= 0;
+        d2(~(active(Ui) & active(Uj))) = Inf;
+
         % If K>=2, U is non-empty; handle safety anyway
         if isempty(d2), continue; end
 
@@ -59,7 +63,7 @@ indxwithzerosource = find(sum(particles.mask ~= 0,2)==0);
             % Keep merged in aIdx; re-seed bIdx
             if logical(particles.mask(i,aIdx)) && logical(particles.mask(i,bIdx))
                 particles.x(i,aIdx) = xnew; particles.y(i,aIdx) = ynew; particles.Q(i,aIdx) = Qnew;
-    
+
                 [xr, yr] = samplePointInPolyshape(Domain, xmin, xmax, ymin, ymax);
                 particles.x(i,bIdx) = xr;   particles.y(i,bIdx) = yr;   particles.Q(i,bIdx) = Qmin;
                 particles.mask(i,bIdx) = 0;
@@ -84,11 +88,11 @@ indxwithzerosource = find(sum(particles.mask ~= 0,2)==0);
     % else
     %     particles.mask = (particles.Q > Qth);                           % create mask if missing
     % end
-    % 
+    %
     % indxwithzerosource = find(sum(particles.mask ~= 0,2)==0);
     % particles.mask = double(particles.mask);                            % keep 0/1 numeric
     % particles.Q    = particles.Q .* particles.mask;                     % ensure inactive sources contribute zero
-    % 
+    %
     % indxwithzerosource = find(sum(particles.mask ~= 0,2)==0);
 
 end

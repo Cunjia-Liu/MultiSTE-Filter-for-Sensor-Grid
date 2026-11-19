@@ -11,7 +11,10 @@ else
     psrc = particles;
 end
 
-%% original structure preserved
+noiseFraction = 0.3;
+if isfield(ts,'noiseFraction'), noiseFraction = ts.noiseFraction; end
+
+%% Original measurement model and likelihood arithmetic
 Likelihood = ones(length(weights),1);
 
 for iter = 1:length(measurement)
@@ -22,7 +25,7 @@ for iter = 1:length(measurement)
         likelihood = PDetect*(1/2)*(1 + erf((D_threshold - measurement_pred)./(NDsigma*sqrt(2)))) ...
                    + (1 - PDetect);
     else
-        sigma = 0.3*measurement(iter) + D_threshold; % sigma for measurement when above threshold
+        sigma = noiseFraction*measurement(iter) + D_threshold; % sigma for measurement when above threshold
         likelihood = (1./(sigma.*sqrt(2*pi))) .* exp(-((measurement_pred - measurement(iter)).^2) ./ (2*sigma.^2));
     end
 

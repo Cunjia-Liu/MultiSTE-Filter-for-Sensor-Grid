@@ -34,6 +34,5 @@ function [ C ] = Plume_model(psource,p,truesource)
 
         C = C + Q./(2*pi.*D).*exp((windcomponent.*u)./(2.*D)).*besselk(0,module_dist./lamda);
     end
-        C(besselk(0,module_dist./lamda)<=1e-30) = 0;
+        % C(besselk(0,module_dist./lamda)<=1e-30) = 0;
 end
-

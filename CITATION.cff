@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this filter, please cite the associated Mr.MSTE paper linked below."
+title: "MultiSTE Filter for a Static Sensor Network"
+type: software
+authors:
+  - family-names: Nanavati
+    given-names: Rohit V.
+  - family-names: Liu
+    given-names: Cunjia
+url: "https://github.com/Cunjia-Liu/MultiSTE-Filter-for-Sensor-Grid"
+preferred-citation:
+    type: unpublished
+    title: "Mr.MSTE: Multi-robot Multi-Source Term Estimation with Wind-Aware Coverage Control"
+    authors:
+      - family-names: Nanavati
+        given-names: Rohit V.
+      - family-names: Glover
+        given-names: Timothy J.
+      - family-names: Coombes
+        given-names: Matthew J.
+      - family-names: Liu
+        given-names: Cunjia
+    url: "https://arxiv.org/abs/2512.17001"

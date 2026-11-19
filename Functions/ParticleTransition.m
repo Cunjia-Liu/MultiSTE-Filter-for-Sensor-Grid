@@ -1,15 +1,29 @@
-function [TransitParticles,TransitWeights,ProcessCov] = ParticleTransition(particles,weights,TransitionSigma,Domain,ts)
+function [TransitParticles,TransitWeights,ProcessCov] = ParticleTransition(particles,weights,TransitionSigma,Domain,clusterstatus,ts)
 
 [Np, N_sources] = size(particles.x);
 xmin = min(Domain.Vertices(:,1)); xmax = max(Domain.Vertices(:,1));
 ymin = min(Domain.Vertices(:,2)); ymax = max(Domain.Vertices(:,2));
 
-birthRate = 0.08;
+birthRate = 0.10;
 deathRate = 0.08;
+if isfield(ts,'birthProbability'), birthRate = ts.birthProbability; end
+if isfield(ts,'deathProbability'), deathRate = ts.deathProbability; end
+
+% ABLATION: one switch controls the physics-informed merge/removal rules.
+% Missing switch preserves the original transition exactly.
+enableMergeRemoval = true;
+if isfield(ts,'enableMergeRemoval')
+    enableMergeRemoval = ts.enableMergeRemoval;
+end
 
 phi = ts.phi;
 u = ts.u;
+    % D = truesource.ci;
+    % t = truesource.cii;
 
+% if clusterstatus
+%     particles = ClusterTransitionUpdate(particles);
+% end
 
 mask = (particles.mask ~= 0);
 M = sum(mask, 2);                       % active count per particle
@@ -26,17 +40,23 @@ for ii = birthIdx.'
         j = inact(randi(numel(inact))); % choose one to activate
 
         % Sample a new position inside the polygon (quick rejection in bbox)
+        % xr = xmin + (xmax - xmin)*rand; yr = ymin + (ymax - ymin)*rand;
         xr = xmin + (xmax - xmin)*0.05 + 0.9*(xmax - xmin)*rand; yr = ymin + (ymax - ymin)*0.05 +  0.9*(ymax - ymin)*rand;
         tries = 0;
         while ~isinterior(Domain, xr, yr) && tries < 10
+            % xr = xmin + (xmax - xmin)*rand; yr = ymin + (ymax - ymin)*rand;
             xr = xmin + (xmax - xmin)*0.05 + 0.9*(xmax - xmin)*rand; yr = ymin + (ymax - ymin)*0.05 +  0.9*(ymax - ymin)*rand;
             tries = tries + 1;
         end
         if ~isinterior(Domain, xr, yr)
+            % rare fallback: snap to a random vertex
             V = Domain.Vertices; k = randi(size(V,1)); xr = V(k,1); yr = V(k,2);
         end
 
+        % Small positive prior for Q (tune as needed)
+        % Q0 = max(0.01, TransitionSigma.Q*abs(randn) + 0.01);
         Q0 = gamrnd(2.5,6);
+
 
         particles.x(ii,j) = xr;
         particles.y(ii,j) = yr;
@@ -55,7 +75,8 @@ deathIdx = find(doDeath);
 indxwithat2source = find(sum(particles.mask(deathIdx,:) ~= 0,2)<2);
 
 if ~isempty(deathIdx)
-    threshFrac = 0.15;  % e.g., 5% of domain diagonal
+    threshFrac = 0.15;  % death-event threshold / domain diagonal
+    if isfield(ts,'deathMergeFrac'), threshFrac = ts.deathMergeFrac; end
 
     % Build a small sub-struct for ONLY the particles that are “dying”
     sub.x    = particles.x(deathIdx, :);
@@ -64,7 +85,18 @@ if ~isempty(deathIdx)
     sub.mask = particles.mask(deathIdx, :);
 
     % Apply your rule: if a close pair exists -> merge; else -> cull lowest-Q
-    sub = mergeOrCullSources(sub, Domain, threshFrac);
+    if enableMergeRemoval
+        sub = mergeOrCullSources(sub, Domain, threshFrac);
+    else
+        % Same death-event probability; remove one uniformly chosen active
+        % source, independent of its position or release rate. No merging.
+        for i=1:numel(deathIdx)
+            active = find(sub.mask(i,:)~=0);
+            killCol = active(randi(numel(active)));
+            sub.mask(i,killCol) = 0;
+            sub.Q(i,killCol) = 0;
+        end
+    end
 
     % Write back
     particles.x(deathIdx, :) = sub.x;
@@ -75,12 +107,23 @@ end
 indxwithzerosource = find(sum(particles.mask ~= 0,2)==0);
 
 %%%%
-threshFrac = 0.1;   % 5% of domain diagonal
-Qmin       = 0.75;   % minimal release rate for re-seeded source (tune as needed)
+threshFrac = 0.10;  % deterministic merge threshold / domain diagonal
+Qmin = 0.75;         % low-release-rate removal threshold
+if isfield(ts,'mergeFrac'), threshFrac = ts.mergeFrac; end
+if isfield(ts,'minReleaseRate'), Qmin = ts.minReleaseRate; end
 
-particles = mergeCloseSourcesInParticles(particles, Domain, threshFrac, Qmin);
+if enableMergeRemoval
+    particles = mergeCloseSourcesInParticles(particles, Domain, threshFrac, Qmin);
+end
 
 %%%%%
+
+% if clusterstatus
+%     particles = ClusterTransitionUpdate(particles);
+% end
+
+% motion update
+
 % --------------------------
 % Motion update (active only)
 % --------------------------
@@ -92,9 +135,14 @@ for jj = 1:N_sources
     % Only update active rows
     activeRows = logical(particles.mask(:,jj));
 
+    % Draw noise only for active rows
+    % nx = TransitionSigma.x * randn(sum(activeRows),1);
+    % ny = TransitionSigma.y * randn(sum(activeRows),1);
+
+
     nx_w = TransitionSigma.x * randn(sum(activeRows),1);
     ny_w = TransitionSigma.y * randn(sum(activeRows),1);
-    
+
     n_g = R_wg*[nx_w'; ny_w'];
 
     nx = n_g(1,:)';
@@ -113,10 +161,12 @@ for jj = 1:N_sources
     counter = 0;
     while any(idx) && counter < 5
         unfit = find(idx);
+        % nux = TransitionSigma.x * randn(numel(unfit),1);
+        % nuy = TransitionSigma.y * randn(numel(unfit),1);
 
         nux_w = TransitionSigma.x * randn(numel(unfit),1);
         nuy_w = TransitionSigma.y * randn(numel(unfit),1);
-        
+
         nu_g = R_wg*[nux_w'; nuy_w'];
 
         nux = nu_g(1,:)';
