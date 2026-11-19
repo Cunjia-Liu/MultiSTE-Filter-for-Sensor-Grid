@@ -72,6 +72,11 @@ else
 end
 title(state.rates,titleText,'Interpreter','none','FontSize',10);
 drawnow;
+% Optional GIF capture uses the already-rendered posterior. It is outside
+% inference/extraction timers and inside the RNG-restoring display scope.
+if isfield(cfg.plot,'gifFile') && ~isempty(cfg.plot.gifFile)
+    state = mste_write_gif_frame(state,cfg,snapshot.update);
+end
 if cfg.plot.pauseSeconds>0 && isgraphics(state.figure)
     pause(cfg.plot.pauseSeconds);
 end
